@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	// "fmt"
 	"net/http"
 	"time"
 
@@ -21,9 +21,30 @@ type BlogPost struct {
 	PublishedAt time.Time `json:"publishedAt"`
 }
 
-// Объявление переменных "Пост" "ID счетчик"
-var blogPosts []BlogPost
-var idCounter uint = 1
+// Глобальная переменная для хранения подключения к базе данных
+var db *gorm.DB
+
+func main() {
+	// Подключение к базе данных
+	var err error
+	db, err = gorm.Open("postgres", "host=localhost port=5432 user=postgres dbname=blogdb sslmode=disable password=postgres")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// Автомиграция для создания таблицы, если её нет
+	db.AutoMigrate(&BlogPost{})
+
+	r := mux.NewRouter()
+	r.HandleFunc("/blogposts", CreateBlogPost).Methods("POST")
+	r.HandleFunc("/blogposts", GetBlogPosts).Methods("GET")
+	r.HandleFunc("/blogposts/{id}", GetBlogPost).Methods("GET")
+	r.HandleFunc("/blogposts/{id}", UpdateBlogPost).Methods("PUT")
+	r.HandleFunc("/blogposts/{id}", DeleteBlogPost).Methods("DELETE")
+	http.Handle("/", r)
+	http.ListenAndServe(":8080", nil)
+}
 
 // Метод для создания новой записи блога
 func CreateBlogPost(w http.ResponseWriter, r *http.Request) {
@@ -33,32 +54,43 @@ func CreateBlogPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	newPost.ID = idCounter
-	idCounter++
 	newPost.PublishedAt = time.Now()
-	blogPosts = append(blogPosts, newPost)
+
+	// Сохранение записи в базе данных
+	if err := db.Create(&newPost).Error; err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(newPost)
 }
 
-// Метод для получения списка всех записей блога
+// Метод для получения списка всех записей блога из базы данных
 func GetBlogPosts(w http.ResponseWriter, r *http.Request) {
+	var posts []BlogPost
+	if err := db.Find(&posts).Error; err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(blogPosts)
+	json.NewEncoder(w).Encode(posts)
 }
 
-// Метод для получения конкретной записи блога по ID
+// Метод для получения конкретной записи блога по ID из базы данных
 func GetBlogPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
 	postID := params["id"]
-	for _, post := range blogPosts {
-		if fmt.Sprint(post.ID) == postID {
-			json.NewEncoder(w).Encode(post)
-			return
-		}
+
+	var post BlogPost
+	if err := db.Where("id = ?", postID).First(&post).Error; err != nil {
+		http.NotFound(w, r)
+		return
 	}
-	http.NotFound(w, r)
+
+	json.NewEncoder(w).Encode(post)
 }
 
 // Метод для обновления записи блога по ID
@@ -72,51 +104,33 @@ func UpdateBlogPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	for index, post := range blogPosts {
-		if fmt.Sprint(post.ID) == postID {
-			updatedPost.ID = post.ID
-			updatedPost.PublishedAt = post.PublishedAt
-			blogPosts[index] = updatedPost
-			json.NewEncoder(w).Encode(updatedPost)
-			return
-		}
+	var existingPost BlogPost
+	if err := db.Where("id = ?", postID).First(&existingPost).Error; err != nil {
+		http.NotFound(w, r)
+		return
 	}
-	http.NotFound(w, r)
+	updatedPost.ID = existingPost.ID
+	updatedPost.PublishedAt = existingPost.PublishedAt
+
+	// Обновление записи в базе данных
+	if err := db.Save(&updatedPost).Error; err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(updatedPost)
 }
 
 // Метод для удаления записи блога по ID
 func DeleteBlogPost(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	postID := params["id"]
-	for index, post := range blogPosts {
-		if fmt.Sprint(post.ID) == postID {
-			blogPosts = append(blogPosts[:index], blogPosts[index+1:]...)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+
+	// Удаление записи из базы данных
+	if err := db.Where("id = ?", postID).Delete(&BlogPost{}).Error; err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
 	}
-	http.NotFound(w, r)
-}
 
-// Глобальная переменная для хранения подключения к базе данных
-var db *gorm.DB
-
-func main() {
-	// Подключение к базе данных
-	var err error
-	db, err = gorm.Open("postgres", "host=localhost port=5432 user=postgres dbname=blogdb sslmode=disable password=postgres")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-
-	// Ваш существующий код
-	r := mux.NewRouter()
-	r.HandleFunc("/blogposts", CreateBlogPost).Methods("POST")
-	r.HandleFunc("/blogposts", GetBlogPosts).Methods("GET")
-	r.HandleFunc("/blogposts/{id}", GetBlogPost).Methods("GET")
-	r.HandleFunc("/blogposts/{id}", UpdateBlogPost).Methods("PUT")
-	r.HandleFunc("/blogposts/{id}", DeleteBlogPost).Methods("DELETE")
-	http.Handle("/", r)
-	http.ListenAndServe(":8080", nil)
+	w.WriteHeader(http.StatusNoContent)
 }
