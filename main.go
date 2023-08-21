@@ -6,7 +6,11 @@ import (
 	"net/http"
 	"time"
 
+	"log"
+
 	"github.com/gorilla/mux"
+	"github.com/jinzhu/gorm"
+	_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
 // Структура данных
@@ -94,15 +98,25 @@ func DeleteBlogPost(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func main() {
-	r := mux.NewRouter()
+// Глобальная переменная для хранения подключения к базе данных
+var db *gorm.DB
 
+func main() {
+	// Подключение к базе данных
+	var err error
+	db, err = gorm.Open("postgres", "host=localhost port=5432 user=postgres dbname=blogdb sslmode=disable password=postgres")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// Ваш существующий код
+	r := mux.NewRouter()
 	r.HandleFunc("/blogposts", CreateBlogPost).Methods("POST")
 	r.HandleFunc("/blogposts", GetBlogPosts).Methods("GET")
 	r.HandleFunc("/blogposts/{id}", GetBlogPost).Methods("GET")
 	r.HandleFunc("/blogposts/{id}", UpdateBlogPost).Methods("PUT")
 	r.HandleFunc("/blogposts/{id}", DeleteBlogPost).Methods("DELETE")
-
 	http.Handle("/", r)
 	http.ListenAndServe(":8080", nil)
 }
