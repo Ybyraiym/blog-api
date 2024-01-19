@@ -7,4 +7,5 @@ type BlogPost struct {
 	Title       string    `json:"title"`
 	Content     string    `json:"content"`
 	PublishedAt time.Time `json:"publishedAt"`
+	Username    string    `json:"username"`
 }

@@ -3,12 +3,53 @@ package handlers
 import (
 	"blog-api/models"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"blog-api/authentication"
 
+	"github.com/golang-jwt/jwt"
 	"github.com/jinzhu/gorm"
 )
+
+// Вспомогательная функция для получения имени пользователя из токена
+func GetUsernameFromToken(tokenString string) (string, error) {
+	// Проверяем, что токен не пустой
+	if tokenString == "" {
+		return "", errors.New("токен отсутствует")
+	}
+
+	// Разбиваем токен на части
+	tokenParts := strings.Split(tokenString, ".")
+	if len(tokenParts) != 3 {
+		return "", errors.New("неверный формат токена")
+	}
+
+	// Проверяем токен и извлекаем из него имя пользователя
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Проверка метода подписи
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("неподдерживаемый метод подписи: %v", token.Header["alg"])
+		}
+
+		// Возвращаем секретный ключ
+		return authentication.TokenSecret, nil
+	})
+	if err != nil {
+		return "", err
+	}
+
+	// Проверяем валидность токена
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		if username, ok := claims["username"].(string); ok {
+			return username, nil
+		}
+	}
+
+	return "", errors.New("неверный токен")
+}
 
 func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	var newUser models.User
@@ -67,7 +108,7 @@ func AuthenticateUser(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	// Аутентификация
-	authenticator := &authentication.PostgreSQLAuthenticator{DB: db.DB()} //бля, я sqlBD на db.DB() заменил, ниче не понял но ароде заработало
+	authenticator := &authentication.PostgreSQLAuthenticator{DB: db.DB()}
 	isAuthenticated, err := authenticator.Authenticate(login, password)
 
 	if err != nil {
@@ -76,8 +117,17 @@ func AuthenticateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isAuthenticated {
-		// Аутентификация успешна.
-		// Возможно, здесь может быть токен.
+		// Аутентификация успешна. Генерация токена.
+		tokenString, err := authentication.GenerateToken(login)
+		if err != nil {
+			http.Error(w, "Ошибка генерации токена", http.StatusInternalServerError)
+			return
+		}
+
+		// Отправляем токен в ответе
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 	} else {
 		// Неверный логин или пароль.
 		http.Error(w, "Неверные учетные данные", http.StatusUnauthorized)

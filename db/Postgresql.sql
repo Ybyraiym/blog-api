@@ -6,6 +6,7 @@ CREATE TABLE public.blog_posts (
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     published_at TIMESTAMP NOT NULL
+    username VARCHAR(255) NOT NULL;
 );
 
 CREATE TABLE public.users (
